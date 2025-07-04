@@ -59,7 +59,6 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   };
 
   const toggleSlot = (dayOfWeek: number, startTime: string, endTime: string) => {
-    const slotKey = `${dayOfWeek}-${startTime}-${endTime}`;
     const isSelected = isSlotSelected(dayOfWeek, startTime, endTime);
 
     if (isSelected) {

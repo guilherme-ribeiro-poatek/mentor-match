@@ -4,7 +4,7 @@ import { UserData } from '../types';
 
 const LoadingPage: React.FC = () => {
   const navigate = useNavigate();
-  const [loadingText, setLoadingText] = useState('Looking for a match in the following weeks');
+  const [loadingText] = useState('Looking for a match in the following weeks');
   const [dots, setDots] = useState('');
 
   useEffect(() => {
