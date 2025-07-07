@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
@@ -83,15 +84,168 @@ function cleanOldData() {
 cleanOldData();
 setInterval(cleanOldData, 24 * 60 * 60 * 1000); // Daily cleanup
 
-// Email configuration (placeholder)
+// Email configuration
 const transporter = nodemailer.createTransport({
-  // Configure with actual email service
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   }
 });
+
+// Verify email configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('Email configuration error:', error);
+  } else {
+    console.log('Email server is ready to send messages');
+  }
+});
+
+// Google Calendar configuration
+const calendar = google.calendar('v3');
+const auth = new google.auth.GoogleAuth({
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  },
+  scopes: ['https://www.googleapis.com/auth/calendar'],
+});
+
+// Helper function to create Google Calendar event
+async function createCalendarEvent(mentorEmail, menteeEmail, dayOfWeek, scheduledTime, scheduledDate) {
+  try {
+    const authClient = await auth.getClient();
+    google.options({ auth: authClient });
+
+    // Parse the scheduled time to get start and end times
+    const [startTimeStr, endTimeStr] = scheduledTime.split(' - ');
+    
+    // Calculate the actual date for the event (this week's occurrence of the dayOfWeek)
+    const eventDate = getNextWeekdayDate(dayOfWeek);
+    
+    // Convert time strings to proper datetime
+    const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00`);
+    const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00`);
+
+    const event = {
+      summary: 'Mentor Match - Mentoring Session',
+      description: `Mentoring session organized through Mentor Match platform.\n\nMentor: ${mentorEmail}\nMentee: ${menteeEmail}\n\nPlease reach out to each other to confirm the meeting details and share the Google Meet link.`,
+      start: {
+        dateTime: startDateTime.toISOString(),
+        timeZone: 'America/Sao_Paulo',
+      },
+      end: {
+        dateTime: endDateTime.toISOString(),
+        timeZone: 'America/Sao_Paulo',
+      },
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'email', minutes: 60 },
+          { method: 'popup', minutes: 15 }
+        ]
+      },
+      conferenceData: {
+        createRequest: {
+          requestId: uuidv4(),
+          conferenceSolutionKey: { type: 'hangoutsMeet' }
+        }
+      }
+    };
+
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      resource: event,
+      conferenceDataVersion: 1
+    });
+
+    console.log('Calendar event created:', response.data.htmlLink);
+    return {
+      success: true,
+      eventId: response.data.id,
+      eventLink: response.data.htmlLink,
+      meetLink: response.data.conferenceData?.entryPoints?.[0]?.uri || null
+    };
+  } catch (error) {
+    console.error('Error creating calendar event:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Helper function to get next occurrence of a weekday
+function getNextWeekdayDate(dayOfWeek) {
+  const today = new Date();
+  
+  // Convert day name to day number (0=Sunday, 1=Monday, etc.)
+  const dayNameToNumber = {
+    'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
+    'Thursday': 4, 'Friday': 5, 'Saturday': 6
+  };
+  
+  const targetDay = dayNameToNumber[dayOfWeek] !== undefined ? 
+    dayNameToNumber[dayOfWeek] : parseInt(dayOfWeek);
+  const currentDay = today.getDay();
+  
+  let daysToAdd = targetDay - currentDay;
+  if (daysToAdd <= 0) {
+    daysToAdd += 7; // Next week if same day or past
+  }
+  
+  const targetDate = new Date(today);
+  targetDate.setDate(today.getDate() + daysToAdd);
+  
+  return targetDate.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+}
+
+// Helper function to convert 12-hour time to 24-hour format
+function convertTo24Hour(time12h) {
+  try {
+    const [time, modifier] = time12h.trim().split(' ');
+    let [hours, minutes] = time.split(':');
+    
+    hours = parseInt(hours, 10);
+    
+    if (modifier === 'AM') {
+      if (hours === 12) {
+        hours = 0; // 12 AM = 00:00
+      }
+    } else if (modifier === 'PM') {
+      if (hours !== 12) {
+        hours += 12; // 1 PM = 13:00, 2 PM = 14:00, etc.
+      }
+      // 12 PM = 12:00 (stays the same)
+    }
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes}`;
+  } catch (error) {
+    console.error('Error converting time:', time12h, error);
+    return '09:00'; // fallback time
+  }
+}
+
+// Helper function to generate Google Calendar "Add to Calendar" links
+function generateGoogleCalendarLink(mentorEmail, menteeEmail, dayOfWeek, scheduledTime) {
+  const eventDate = getNextWeekdayDate(dayOfWeek);
+  const [startTimeStr, endTimeStr] = scheduledTime.split(' - ');
+  const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00`);
+  const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00`);
+
+  const formatDateForGoogle = (date) => {
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  };
+
+  const startTime = formatDateForGoogle(startDateTime);
+  const endTime = formatDateForGoogle(endDateTime);
+  
+  const eventTitle = encodeURIComponent('Mentor Match - Mentoring Session');
+  const eventDetails = encodeURIComponent(`Mentoring session\nMentor: ${mentorEmail}\nMentee: ${menteeEmail}\n\nPlease coordinate with your partner to confirm meeting details.`);
+  
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${eventTitle}&dates=${startTime}/${endTime}&details=${eventDetails}&location=Google%20Meet`;
+}
 
 // API Routes
 
@@ -281,20 +435,114 @@ function distributeMatches(matches, limit) {
   return result;
 }
 
-// Send invitation email (placeholder)
-app.post('/api/send-invitation', (req, res) => {
-  const { mentorEmail, menteeEmail, scheduledTime, scheduledDate } = req.body;
+// Send invitation email
+app.post('/api/send-invitation', async (req, res) => {
+  const { mentorEmail, menteeEmail, scheduledTime, scheduledDate, dayOfWeek } = req.body;
   
-  // Placeholder for email sending
-  console.log(`Sending invitation:
-    Mentor: ${mentorEmail}
-    Mentee: ${menteeEmail}
-    Date: ${scheduledDate}
-    Time: ${scheduledTime}
-  `);
-  
-  // In a real implementation, you would send actual emails here
-  res.json({ success: true, message: 'Invitation sent successfully' });
+  if (!mentorEmail || !menteeEmail || !scheduledTime || !scheduledDate) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // Create Google Calendar event first
+    const calendarResult = await createCalendarEvent(mentorEmail, menteeEmail, dayOfWeek, scheduledTime, scheduledDate);
+    
+    // Generate individual Google Calendar links for each user
+    const calendarLink = generateGoogleCalendarLink(mentorEmail, menteeEmail, dayOfWeek, scheduledTime);
+    
+    let calendarSection = '';
+    if (calendarResult.success) {
+      calendarSection = `
+        <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3>📅 Calendar Event</h3>
+          <p>A calendar event template has been created. Choose how to add it to your calendar:</p>
+          <p><strong>📅 <a href="${calendarLink}" style="color: #3b82f6; text-decoration: none; background: #3b82f6; color: white; padding: 8px 16px; border-radius: 4px; display: inline-block; margin: 5px;">➕ Add to Google Calendar</a></strong></p>
+          ${calendarResult.meetLink ? `<p><strong>🎥 <a href="${calendarResult.meetLink}" style="color: #10b981; text-decoration: none; background: #10b981; color: white; padding: 8px 16px; border-radius: 4px; display: inline-block; margin: 5px;">📹 Join Google Meet</a></strong></p>` : ''}
+          <p style="font-size: 12px; color: #666; margin-top: 10px;">
+            Both mentor and mentee will need to add this event to their own calendars and coordinate meeting details.
+          </p>
+        </div>
+      `;
+    } else {
+      calendarSection = `
+        <div style="background-color: #fef3cd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3>📅 Add to Calendar</h3>
+          <p><strong>📅 <a href="${calendarLink}" style="color: #3b82f6; text-decoration: none; background: #3b82f6; color: white; padding: 8px 16px; border-radius: 4px; display: inline-block;">➕ Add to Google Calendar</a></strong></p>
+          <p style="font-size: 12px; color: #666; margin-top: 10px;">
+            Please manually add this meeting to your calendar: ${dayOfWeek}, ${scheduledTime}
+          </p>
+        </div>
+      `;
+    }
+
+    // Email template for mentor
+    const mentorMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: mentorEmail,
+      subject: 'Mentor Match - New Mentoring Session Scheduled',
+      html: `
+        <h2>🎯 New Mentoring Session Scheduled</h2>
+        <p>Hello,</p>
+        <p>Great news! You've been matched with a mentee for a mentoring session.</p>
+        <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3>📅 Session Details:</h3>
+          <p><strong>Date:</strong> ${dayOfWeek}, ${scheduledDate}</p>
+          <p><strong>Time:</strong> ${scheduledTime}</p>
+          <p><strong>Mentee:</strong> ${menteeEmail}</p>
+        </div>
+        ${calendarSection}
+        <p>Please reach out to your mentee to confirm the session and discuss any additional meeting details.</p>
+        <p>Best regards,<br>Mentor Match Team</p>
+      `
+    };
+
+    // Email template for mentee
+    const menteeMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: menteeEmail,
+      subject: 'Mentor Match - New Mentoring Session Scheduled',
+      html: `
+        <h2>🎓 New Mentoring Session Scheduled</h2>
+        <p>Hello,</p>
+        <p>Excellent! You've been matched with a mentor for a mentoring session.</p>
+        <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3>📅 Session Details:</h3>
+          <p><strong>Date:</strong> ${dayOfWeek}, ${scheduledDate}</p>
+          <p><strong>Time:</strong> ${scheduledTime}</p>
+          <p><strong>Mentor:</strong> ${mentorEmail}</p>
+        </div>
+        ${calendarSection}
+        <p>Your mentor will reach out to you soon to confirm the session and discuss any additional meeting details.</p>
+        <p>Best regards,<br>Mentor Match Team</p>
+      `
+    };
+
+    // Send emails to both parties
+    await Promise.all([
+      transporter.sendMail(mentorMailOptions),
+      transporter.sendMail(menteeMailOptions)
+    ]);
+
+    console.log(`Invitation emails sent successfully:
+      Mentor: ${mentorEmail}
+      Mentee: ${menteeEmail}
+      Date: ${scheduledDate}
+      Time: ${scheduledTime}
+      Calendar Event: ${calendarResult.success ? calendarResult.eventLink : 'Failed to create'}
+    `);
+
+    res.json({ 
+      success: true, 
+      message: 'Invitation emails sent successfully',
+      calendarEvent: calendarResult.success ? {
+        eventLink: calendarResult.eventLink,
+        meetLink: calendarResult.meetLink
+      } : null
+    });
+  } catch (error) {
+    console.error('Error sending invitation emails:', error);
+    res.status(500).json({ error: 'Failed to send invitation emails' });
+  }
 });
 
 // Health check endpoint

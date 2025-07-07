@@ -36,6 +36,48 @@ const ResultsPage: React.FC = () => {
     return `${displayHour}:${minutes} ${ampm}`;
   };
 
+  const sendInvitation = async (match: Match) => {
+    try {
+      const response = await fetch('/api/send-invitation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mentorEmail: results!.userData.userType === 'mentor' ? results!.userData.email : match.partnerEmail,
+          menteeEmail: results!.userData.userType === 'mentee' ? results!.userData.email : match.partnerEmail,
+          scheduledTime: `${formatTime(match.startTime)} - ${formatTime(match.endTime)}`,
+          scheduledDate: 'This week', // You might want to calculate the actual date
+          dayOfWeek: getDayName(match.dayOfWeek)
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        let message = `✅ Invitation sent successfully to ${match.partnerEmail}!`;
+        
+        if (data.calendarEvent) {
+          message += `\n\n📅 Calendar event created with Google Meet link!`;
+          message += `\n🔗 Event: ${data.calendarEvent.eventLink}`;
+          
+          if (data.calendarEvent.meetLink) {
+            message += `\n🎥 Meet: ${data.calendarEvent.meetLink}`;
+          }
+        } else {
+          message += `\n\n⚠️ Calendar event could not be created automatically. Please add the meeting to your calendar manually.`;
+        }
+        
+        alert(message);
+      } else {
+        alert(`❌ Failed to send invitation: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error sending invitation:', error);
+      alert('❌ Network error. Please try again.');
+    }
+  };
+
   const handleStartOver = () => {
     sessionStorage.clear();
     navigate('/');
@@ -107,10 +149,7 @@ const ResultsPage: React.FC = () => {
                   
                   <div className="ml-4">
                     <button
-                      onClick={() => {
-                        // In a real app, this would send an invitation
-                        alert(`Invitation will be sent to ${match.partnerEmail} for ${getDayName(match.dayOfWeek)} at ${formatTime(match.startTime)}`);
-                      }}
+                      onClick={() => sendInvitation(match)}
                       className="btn-primary text-sm px-4 py-2"
                     >
                       Send Invite
