@@ -50,6 +50,14 @@ db.serialize(() => {
     FOREIGN KEY (user_id) REFERENCES users (id)
   )`);
 
+  db.run(`CREATE TABLE IF NOT EXISTS abilities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    ability TEXT NOT NULL,
+    week_key TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+  )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mentor_id TEXT NOT NULL,
@@ -75,6 +83,7 @@ function cleanOldData() {
   const currentWeekKey = getCurrentWeekKey();
   
   db.run(`DELETE FROM availability WHERE week_key < ?`, [currentWeekKey]);
+  db.run(`DELETE FROM abilities WHERE week_key < ?`, [currentWeekKey]);
   db.run(`DELETE FROM users WHERE week_key < ?`, [currentWeekKey]);
   
   console.log(`Cleaned data older than week: ${currentWeekKey}`);
@@ -298,7 +307,7 @@ app.post('/api/check-email', (req, res) => {
 
 // Register user and availability
 app.post('/api/register', (req, res) => {
-  const { email, userType, availability } = req.body;
+  const { email, userType, availability, abilities } = req.body;
   
   if (!email || !userType || !availability) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -316,22 +325,39 @@ app.post('/api/register', (req, res) => {
         return res.status(500).json({ error: 'Database error' });
       }
 
-      // Delete existing availability for this user
+      // Delete existing availability and abilities for this user
       db.run(`DELETE FROM availability WHERE user_id = ?`, [userId], (err) => {
         if (err) {
           return res.status(500).json({ error: 'Database error' });
         }
 
-        // Insert availability slots
-        const stmt = db.prepare(`INSERT INTO availability (user_id, day_of_week, start_time, end_time, week_key) VALUES (?, ?, ?, ?, ?)`);
-        
-        availability.forEach(slot => {
-          stmt.run([userId, slot.dayOfWeek, slot.startTime, slot.endTime, weekKey]);
+        db.run(`DELETE FROM abilities WHERE user_id = ?`, [userId], (err) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error' });
+          }
+
+          // Insert availability slots
+          const availabilityStmt = db.prepare(`INSERT INTO availability (user_id, day_of_week, start_time, end_time, week_key) VALUES (?, ?, ?, ?, ?)`);
+          
+          availability.forEach(slot => {
+            availabilityStmt.run([userId, slot.dayOfWeek, slot.startTime, slot.endTime, weekKey]);
+          });
+          
+          availabilityStmt.finalize();
+
+          // Insert abilities if user is a mentor
+          if (userType === 'mentor' && abilities && abilities.length > 0) {
+            const abilitiesStmt = db.prepare(`INSERT INTO abilities (user_id, ability, week_key) VALUES (?, ?, ?)`);
+            
+            abilities.forEach(ability => {
+              abilitiesStmt.run([userId, ability, weekKey]);
+            });
+            
+            abilitiesStmt.finalize();
+          }
+          
+          res.json({ success: true, userId });
         });
-        
-        stmt.finalize();
-        
-        res.json({ success: true, userId });
       });
     }
   );
@@ -371,31 +397,85 @@ app.post('/api/find-matches', (req, res) => {
           return res.status(500).json({ error: 'Database error' });
         }
 
-        // Find overlapping time slots
-        const matches = [];
+        // Get abilities for mentors (if user is mentee, get mentor abilities)
+        const shouldGetAbilities = user.user_type === 'mentee';
         
-        userAvailability.forEach(userSlot => {
-          otherAvailability.forEach(otherSlot => {
-            if (userSlot.day_of_week === otherSlot.day_of_week) {
-              const overlap = findTimeOverlap(userSlot, otherSlot);
-              if (overlap && overlap.duration >= 30) { // Minimum 30 minutes
-                matches.push({
-                  partnerId: otherSlot.user_id,
-                  partnerEmail: otherSlot.email,
-                  dayOfWeek: userSlot.day_of_week,
-                  startTime: overlap.startTime,
-                  endTime: overlap.endTime,
-                  duration: overlap.duration
-                });
-              }
+        if (shouldGetAbilities) {
+          // Get abilities for all mentors
+          db.all(`
+            SELECT ab.user_id, ab.ability 
+            FROM abilities ab 
+            JOIN users u ON ab.user_id = u.id 
+            WHERE u.user_type = 'mentor' AND ab.week_key = ?
+          `, [currentWeekKey], (err, mentorAbilities) => {
+            if (err) {
+              return res.status(500).json({ error: 'Database error' });
             }
-          });
-        });
 
-        // Limit to 5 matches and distribute evenly
-        const limitedMatches = distributeMatches(matches, 5);
-        
-        res.json({ matches: limitedMatches });
+            // Group abilities by user ID
+            const abilitiesByUser = {};
+            mentorAbilities.forEach(ability => {
+              if (!abilitiesByUser[ability.user_id]) {
+                abilitiesByUser[ability.user_id] = [];
+              }
+              abilitiesByUser[ability.user_id].push(ability.ability);
+            });
+
+            // Find overlapping time slots
+            const matches = [];
+            
+            userAvailability.forEach(userSlot => {
+              otherAvailability.forEach(otherSlot => {
+                if (userSlot.day_of_week === otherSlot.day_of_week) {
+                  const overlap = findTimeOverlap(userSlot, otherSlot);
+                  if (overlap && overlap.duration >= 30) { // Minimum 30 minutes
+                    matches.push({
+                      partnerId: otherSlot.user_id,
+                      partnerEmail: otherSlot.email,
+                      dayOfWeek: userSlot.day_of_week,
+                      startTime: overlap.startTime,
+                      endTime: overlap.endTime,
+                      duration: overlap.duration,
+                      abilities: abilitiesByUser[otherSlot.user_id] || []
+                    });
+                  }
+                }
+              });
+            });
+
+            // Limit to 5 matches and distribute evenly
+            const limitedMatches = distributeMatches(matches, 5);
+            
+            res.json({ matches: limitedMatches });
+          });
+        } else {
+          // For mentors, don't need to get abilities
+          // Find overlapping time slots
+          const matches = [];
+          
+          userAvailability.forEach(userSlot => {
+            otherAvailability.forEach(otherSlot => {
+              if (userSlot.day_of_week === otherSlot.day_of_week) {
+                const overlap = findTimeOverlap(userSlot, otherSlot);
+                if (overlap && overlap.duration >= 30) { // Minimum 30 minutes
+                  matches.push({
+                    partnerId: otherSlot.user_id,
+                    partnerEmail: otherSlot.email,
+                    dayOfWeek: userSlot.day_of_week,
+                    startTime: overlap.startTime,
+                    endTime: overlap.endTime,
+                    duration: overlap.duration
+                  });
+                }
+              }
+            });
+          });
+
+          // Limit to 5 matches and distribute evenly
+          const limitedMatches = distributeMatches(matches, 5);
+          
+          res.json({ matches: limitedMatches });
+        }
       });
     });
   });

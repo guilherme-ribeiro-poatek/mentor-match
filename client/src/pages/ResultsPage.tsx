@@ -144,6 +144,21 @@ const ResultsPage: React.FC = () => {
                       <p>
                         {userData.userType === 'mentor' ? 'Mentee' : 'Mentor'}: {match.partnerEmail}
                       </p>
+                      {userData.userType === 'mentee' && match.abilities && match.abilities.length > 0 && (
+                        <div className="mt-2">
+                          <p className="font-medium text-gray-700 mb-1">Mentoring Abilities:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {match.abilities.map((ability, index) => (
+                              <span 
+                                key={index}
+                                className="px-2 py-1 bg-primary-100 text-primary-800 text-xs rounded-full"
+                              >
+                                {ability}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   

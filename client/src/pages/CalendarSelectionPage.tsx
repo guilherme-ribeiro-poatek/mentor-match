@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WeeklyCalendar from '../components/WeeklyCalendar';
-import { UserType, TimeSlot } from '../types';
+import { UserType, TimeSlot, AbilityType, ABILITIES } from '../types';
 
 const CalendarSelectionPage: React.FC = () => {
   const navigate = useNavigate();
   const [userType, setUserType] = useState<UserType>('mentor');
   const [email, setEmail] = useState('');
   const [selectedSlots, setSelectedSlots] = useState<TimeSlot[]>([]);
+  const [selectedAbilities, setSelectedAbilities] = useState<AbilityType[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -27,9 +28,32 @@ const CalendarSelectionPage: React.FC = () => {
     setEmail(storedEmail);
     setUserType(storedUserType);
 
+    // Load persisted abilities for mentors
+    if (storedUserType === 'mentor') {
+      loadStoredAbilities(storedEmail);
+    }
+
     // Check if user already has availability data
     checkExistingAvailability(storedEmail);
   }, [navigate]);
+
+  const loadStoredAbilities = (email: string) => {
+    const key = `abilities_${email}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      try {
+        const abilities = JSON.parse(stored) as AbilityType[];
+        setSelectedAbilities(abilities);
+      } catch (err) {
+        console.error('Error parsing stored abilities:', err);
+      }
+    }
+  };
+
+  const saveAbilities = (email: string, abilities: AbilityType[]) => {
+    const key = `abilities_${email}`;
+    localStorage.setItem(key, JSON.stringify(abilities));
+  };
 
   const checkExistingAvailability = async (email: string) => {
     try {
@@ -60,11 +84,25 @@ const CalendarSelectionPage: React.FC = () => {
     }
   };
 
+  const handleAbilityToggle = (ability: AbilityType) => {
+    const newAbilities = selectedAbilities.includes(ability)
+      ? selectedAbilities.filter(a => a !== ability)
+      : [...selectedAbilities, ability];
+    
+    setSelectedAbilities(newAbilities);
+    saveAbilities(email, newAbilities);
+  };
+
   const handleSubmit = async () => {
     setError('');
 
     if (selectedSlots.length === 0) {
       setError('Please select at least one time slot');
+      return;
+    }
+
+    if (userType === 'mentor' && selectedAbilities.length === 0) {
+      setError('Please select at least one ability you can mentor in');
       return;
     }
 
@@ -84,6 +122,7 @@ const CalendarSelectionPage: React.FC = () => {
             startTime: slot.startTime,
             endTime: slot.endTime,
           })),
+          abilities: userType === 'mentor' ? selectedAbilities : undefined,
         }),
       });
 
@@ -96,6 +135,7 @@ const CalendarSelectionPage: React.FC = () => {
           email,
           userType,
           selectedSlots,
+          abilities: userType === 'mentor' ? selectedAbilities : undefined,
         }));
         
         navigate('/loading');
@@ -165,6 +205,38 @@ const CalendarSelectionPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Ability Selection for Mentors */}
+      {userType === 'mentor' && (
+        <div className="card">
+          <h3 className="text-xl font-semibold text-gray-900 mb-4">
+            Select Your Mentoring Abilities
+          </h3>
+          <p className="text-gray-600 mb-6">
+            Choose the abilities you feel comfortable providing mentorship in. You can select multiple areas.
+          </p>
+          
+          <div className="flex flex-wrap gap-2">
+            {ABILITIES.map((ability) => (
+              <button
+                key={ability}
+                onClick={() => handleAbilityToggle(ability)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
+                  selectedAbilities.includes(ability)
+                    ? 'bg-primary-600 text-white hover:bg-primary-700'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {ability}
+              </button>
+            ))}
+          </div>
+          
+          <div className="mt-4 text-sm text-gray-500">
+            Selected: {selectedAbilities.length} abilit{selectedAbilities.length !== 1 ? 'ies' : 'y'}
+          </div>
+        </div>
+      )}
 
       {/* Weekly Calendar */}
       <div className="card">
