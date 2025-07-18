@@ -604,7 +604,7 @@ app.post('/api/send-invitation', async (req, res) => {
 
     // Email template for mentor
     const mentorMailOptions = {
-      from: process.env.EMAIL_USER,
+      from: `"${process.env.EMAIL_FROM_NAME || 'Mentor Match'}" <${process.env.EMAIL_USER}>`,
       to: mentorEmail,
       subject: 'Mentor Match - New Mentoring Session Scheduled',
       html: `
@@ -625,7 +625,7 @@ app.post('/api/send-invitation', async (req, res) => {
 
     // Email template for mentee
     const menteeMailOptions = {
-      from: process.env.EMAIL_USER,
+      from: `"${process.env.EMAIL_FROM_NAME || 'Mentor Match'}" <${process.env.EMAIL_USER}>`,
       to: menteeEmail,
       subject: 'Mentor Match - New Mentoring Session Scheduled',
       html: `
