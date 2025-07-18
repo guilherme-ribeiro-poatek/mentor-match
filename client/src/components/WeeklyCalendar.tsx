@@ -10,6 +10,45 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   selectedSlots,
   onSlotsChange,
 }) => {
+  // Get current week's dates
+  const getCurrentWeekDates = () => {
+    const today = new Date();
+    const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - currentDay); // Go back to Sunday
+    
+    const weekDates = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      weekDates.push(date);
+    }
+    
+    return weekDates;
+  };
+
+  const formatDate = (date: Date): string => {
+    return date.toLocaleDateString('en-US', { 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
+  const isCurrentDay = (date: Date): boolean => {
+    const today = new Date();
+    return date.toDateString() === today.toDateString();
+  };
+
+  const isPastDay = (date: Date): boolean => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    const compareDate = new Date(date);
+    compareDate.setHours(0, 0, 0, 0);
+    return compareDate < today;
+  };
+
+  const weekDates = getCurrentWeekDates();
+
   // Days of the week (0 = Sunday)
   const days = [
     { name: 'Sunday', short: 'Sun', value: 0 },
@@ -59,6 +98,12 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   };
 
   const toggleSlot = (dayOfWeek: number, startTime: string, endTime: string) => {
+    // Check if the day is in the past - if so, don't allow selection
+    const dayDate = weekDates[dayOfWeek];
+    if (isPastDay(dayDate)) {
+      return;
+    }
+
     const isSelected = isSlotSelected(dayOfWeek, startTime, endTime);
 
     if (isSelected) {
@@ -85,12 +130,40 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         <div className="p-3 bg-gray-50 font-medium text-sm text-gray-600">
           Time
         </div>
-        {days.map(day => (
-          <div key={day.value} className="p-3 bg-gray-50 text-center">
-            <div className="font-medium text-sm text-gray-900">{day.short}</div>
-            <div className="text-xs text-gray-600">{day.name}</div>
-          </div>
-        ))}
+        {days.map(day => {
+          const dayDate = weekDates[day.value];
+          const isCurrent = isCurrentDay(dayDate);
+          const isPast = isPastDay(dayDate);
+          
+          return (
+            <div key={day.value} className={`p-3 text-center ${
+              isCurrent 
+                ? 'bg-primary-100' 
+                : isPast 
+                  ? 'bg-gray-100' 
+                  : 'bg-gray-50'
+            }`}>
+              <div className={`font-medium text-sm ${
+                isCurrent 
+                  ? 'text-primary-900' 
+                  : isPast 
+                    ? 'text-gray-500' 
+                    : 'text-gray-900'
+              }`}>
+                {day.name}
+              </div>
+              <div className={`text-xs ${
+                isCurrent 
+                  ? 'text-primary-700' 
+                  : isPast 
+                    ? 'text-gray-400' 
+                    : 'text-gray-600'
+              }`}>
+                {formatDate(dayDate)}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Time slots grid */}
@@ -109,23 +182,29 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
             {/* Day columns */}
             {days.map(day => {
               const selected = isSlotSelected(day.value, timeSlot.startTime, timeSlot.endTime);
+              const dayDate = weekDates[day.value];
+              const isPast = isPastDay(dayDate);
               
               return (
                 <div
                   key={`${day.value}-${timeIndex}`}
-                  className={`p-2 text-center cursor-pointer transition-colors duration-200 border-r border-gray-100 ${
-                    selected
-                      ? 'bg-primary-600 text-white hover:bg-primary-700'
-                      : 'hover:bg-primary-50'
+                  className={`p-2 text-center transition-colors duration-200 border-r border-gray-100 ${
+                    isPast
+                      ? 'cursor-not-allowed bg-gray-50'
+                      : selected
+                        ? 'bg-primary-600 text-white hover:bg-primary-700 cursor-pointer'
+                        : 'hover:bg-primary-50 cursor-pointer'
                   }`}
                   onClick={() => toggleSlot(day.value, timeSlot.startTime, timeSlot.endTime)}
                 >
                   <div className={`w-full h-8 rounded flex items-center justify-center text-xs ${
-                    selected
-                      ? 'bg-primary-700 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-primary-200'
+                    isPast
+                      ? 'bg-gray-200 text-gray-400'
+                      : selected
+                        ? 'bg-primary-700 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-primary-200'
                   }`}>
-                    {selected ? '✓' : '+'}
+                    {isPast ? '×' : selected ? '✓' : '+'}
                   </div>
                 </div>
               );

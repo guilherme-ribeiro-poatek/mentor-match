@@ -249,6 +249,53 @@ function generateGoogleCalendarLink(mentorEmail, menteeEmail, dayOfWeek, schedul
 
 // API Routes
 
+// Check if email exists and get availability
+app.post('/api/check-email', (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const currentWeekKey = getCurrentWeekKey();
+
+  // Check if user exists for current week
+  db.get(`SELECT * FROM users WHERE email = ? AND week_key = ?`, [email, currentWeekKey], (err, user) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!user) {
+      // User doesn't exist, return empty availability
+      return res.json({ 
+        exists: false, 
+        availability: [], 
+        userType: null 
+      });
+    }
+
+    // Get user's availability
+    db.all(`SELECT * FROM availability WHERE user_id = ? AND week_key = ?`, [user.id, currentWeekKey], (err, availability) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      // Transform availability to match frontend format
+      const transformedAvailability = availability.map(slot => ({
+        dayOfWeek: slot.day_of_week,
+        startTime: slot.start_time,
+        endTime: slot.end_time
+      }));
+
+      res.json({ 
+        exists: true, 
+        availability: transformedAvailability,
+        userType: user.user_type
+      });
+    });
+  });
+});
+
 // Register user and availability
 app.post('/api/register', (req, res) => {
   const { email, userType, availability } = req.body;

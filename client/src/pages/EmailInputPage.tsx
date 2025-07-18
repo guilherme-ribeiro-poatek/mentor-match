@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import WeeklyCalendar from '../components/WeeklyCalendar';
-import { UserType, TimeSlot } from '../types';
+import { UserType } from '../types';
 
-const UserInputPage: React.FC = () => {
+const EmailInputPage: React.FC = () => {
   const navigate = useNavigate();
   const [userType, setUserType] = useState<UserType>('mentor');
   const [email, setEmail] = useState('');
-  const [selectedSlots, setSelectedSlots] = useState<TimeSlot[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
   const [error, setError] = useState('');
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleSubmit = async () => {
     setError('');
@@ -19,54 +22,30 @@ const UserInputPage: React.FC = () => {
       return;
     }
 
-    if (!email.includes('@')) {
+    if (!validateEmail(email.trim())) {
       setError('Please enter a valid email address');
       return;
     }
 
-    if (selectedSlots.length === 0) {
-      setError('Please select at least one time slot');
-      return;
-    }
-
-    setIsSubmitting(true);
+    setIsValidating(true);
 
     try {
-      const response = await fetch('/api/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: email.trim(),
-          userType,
-          availability: selectedSlots.map(slot => ({
-            dayOfWeek: slot.dayOfWeek,
-            startTime: slot.startTime,
-            endTime: slot.endTime,
-          })),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Store user data in sessionStorage for the next page
-        sessionStorage.setItem('userData', JSON.stringify({
-          userId: data.userId,
-          email,
-          userType,
-          selectedSlots,
-        }));
-        
-        navigate('/loading');
-      } else {
-        setError(data.error || 'Registration failed');
-      }
+      // Store email and user type in sessionStorage for the next step
+      sessionStorage.setItem('userEmail', email.trim());
+      sessionStorage.setItem('userType', userType);
+      
+      // Navigate to calendar selection page
+      navigate('/calendar-selection');
     } catch (err) {
-      setError('Network error. Please try again.');
+      setError('Something went wrong. Please try again.');
     } finally {
-      setIsSubmitting(false);
+      setIsValidating(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSubmit();
     }
   };
 
@@ -124,10 +103,14 @@ const UserInputPage: React.FC = () => {
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyPress={handleKeyPress}
               className="input-field"
               placeholder="your.email@example.com"
               required
             />
+            <p className="text-sm text-gray-500 mt-1">
+              We'll use this to match you with others and send session invitations.
+            </p>
           </div>
 
           {/* Error Message */}
@@ -139,37 +122,21 @@ const UserInputPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Weekly Calendar */}
-      <div className="card">
-        <h3 className="text-xl font-semibold text-gray-900 mb-4">
-          Select Your Availability This Week
-        </h3>
-        <p className="text-gray-600 mb-6">
-          Click on time slots to mark when you're available. Minimum session length is 30 minutes.
-        </p>
-        
-        <WeeklyCalendar
-          selectedSlots={selectedSlots}
-          onSlotsChange={setSelectedSlots}
-        />
-        
-        <div className="mt-4 text-sm text-gray-500">
-          Selected: {selectedSlots.length} time slot{selectedSlots.length !== 1 ? 's' : ''}
-        </div>
-      </div>
-
-      {/* Submit Button at Bottom */}
+      {/* Next Button */}
       <div className="card">
         <button
           onClick={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isValidating}
           className="btn-primary w-full"
         >
-          {isSubmitting ? 'Registering...' : 'Find My Matches'}
+          {isValidating ? 'Validating...' : 'Next: Select Your Availability'}
         </button>
+        <p className="text-sm text-gray-500 mt-2 text-center">
+          Next, you'll select your available time slots for this week.
+        </p>
       </div>
     </div>
   );
 };
 
-export default UserInputPage; 
+export default EmailInputPage; 

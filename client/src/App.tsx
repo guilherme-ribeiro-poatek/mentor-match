@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import UserInputPage from './pages/UserInputPage';
+import EmailInputPage from './pages/EmailInputPage';
+import CalendarSelectionPage from './pages/CalendarSelectionPage';
 import LoadingPage from './pages/LoadingPage';
 import ResultsPage from './pages/ResultsPage';
 
@@ -21,7 +22,8 @@ function App() {
 
         <main className="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
           <Routes>
-            <Route path="/" element={<UserInputPage />} />
+            <Route path="/" element={<EmailInputPage />} />
+            <Route path="/calendar-selection" element={<CalendarSelectionPage />} />
             <Route path="/loading" element={<LoadingPage />} />
             <Route path="/results" element={<ResultsPage />} />
           </Routes>
