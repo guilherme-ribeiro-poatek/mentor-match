@@ -650,17 +650,57 @@ app.post('/api/send-invitation', async (req, res) => {
       transporter.sendMail(menteeMailOptions)
     ]);
 
+    // Get user IDs from emails to record the match
+    const mentorUser = await new Promise((resolve, reject) => {
+      db.get(`SELECT id FROM users WHERE email = ?`, [mentorEmail], (err, user) => {
+        if (err) reject(err);
+        else resolve(user);
+      });
+    });
+
+    const menteeUser = await new Promise((resolve, reject) => {
+      db.get(`SELECT id FROM users WHERE email = ?`, [menteeEmail], (err, user) => {
+        if (err) reject(err);
+        else resolve(user);
+      });
+    });
+
+    // Record the match in the database (even if user IDs aren't found, we still sent the email)
+    let matchId = null;
+    if (mentorUser && menteeUser) {
+      try {
+        matchId = await new Promise((resolve, reject) => {
+          db.run(`
+            INSERT INTO matches (mentor_id, mentee_id, scheduled_date, scheduled_time, status) 
+            VALUES (?, ?, ?, ?, 'sent')
+          `, [mentorUser.id, menteeUser.id, scheduledDate, scheduledTime], function(err) {
+            if (err) {
+              console.error('Failed to record match in database:', err);
+              resolve(null); // Don't fail the whole operation
+            } else {
+              console.log('Match recorded with ID:', this.lastID);
+              resolve(this.lastID);
+            }
+          });
+        });
+      } catch (error) {
+        console.error('Error recording match:', error);
+      }
+    }
+
     console.log(`Invitation emails sent successfully:
       Mentor: ${mentorEmail}
       Mentee: ${menteeEmail}
       Date: ${scheduledDate}
       Time: ${scheduledTime}
+      Match ID: ${matchId || 'Not recorded'}
       Calendar Event: ${calendarResult.success ? calendarResult.eventLink : 'Failed to create'}
     `);
 
     res.json({ 
       success: true, 
       message: 'Invitation emails sent successfully',
+      matchId: matchId,
       calendarEvent: calendarResult.success ? {
         eventLink: calendarResult.eventLink,
         meetLink: calendarResult.meetLink
@@ -670,6 +710,180 @@ app.post('/api/send-invitation', async (req, res) => {
     console.error('Error sending invitation emails:', error);
     res.status(500).json({ error: 'Failed to send invitation emails' });
   }
+});
+
+// Get overall platform metrics
+app.get('/api/metrics', (req, res) => {
+  const queries = {
+    totalUsers: 'SELECT COUNT(*) as count FROM users',
+    totalMentors: 'SELECT COUNT(*) as count FROM users WHERE user_type = "mentor"',
+    totalMentees: 'SELECT COUNT(*) as count FROM users WHERE user_type = "mentee"',
+    totalSessions: 'SELECT COUNT(*) as count FROM matches',
+    pendingSessions: 'SELECT COUNT(*) as count FROM matches WHERE status = "sent"',
+    thisWeekUsers: `SELECT COUNT(*) as count FROM users WHERE week_key = "${getCurrentWeekKey()}"`
+  };
+
+  const results = {};
+  const queryKeys = Object.keys(queries);
+  let completedQueries = 0;
+
+  queryKeys.forEach(key => {
+    db.get(queries[key], (err, result) => {
+      if (err) {
+        console.error(`Error in ${key} query:`, err);
+        results[key] = 0;
+      } else {
+        results[key] = result.count;
+      }
+      
+      completedQueries++;
+      if (completedQueries === queryKeys.length) {
+        res.json({
+          success: true,
+          metrics: {
+            users: {
+              total: results.totalUsers,
+              mentors: results.totalMentors,
+              mentees: results.totalMentees,
+              thisWeek: results.thisWeekUsers
+            },
+            sessions: {
+              total: results.totalSessions,
+              pending: results.pendingSessions,
+              completed: results.totalSessions - results.pendingSessions
+            }
+          },
+          generatedAt: new Date().toISOString()
+        });
+      }
+    });
+  });
+});
+
+// Get detailed session history
+app.get('/api/metrics/sessions', (req, res) => {
+  db.all(`
+    SELECT 
+      m.*,
+      mentor.email as mentor_email,
+      mentee.email as mentee_email,
+      m.created_at as invitation_sent_at
+    FROM matches m
+    JOIN users mentor ON m.mentor_id = mentor.id
+    JOIN users mentee ON m.mentee_id = mentee.id
+    ORDER BY m.created_at DESC
+    LIMIT 100
+  `, (err, sessions) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    res.json({
+      success: true,
+      sessions: sessions,
+      total: sessions.length
+    });
+  });
+});
+
+// Get weekly session stats
+app.get('/api/metrics/weekly', (req, res) => {
+  db.all(`
+    SELECT 
+      DATE(created_at) as date,
+      COUNT(*) as sessions_count
+    FROM matches 
+    WHERE created_at >= datetime('now', '-30 days')
+    GROUP BY DATE(created_at)
+    ORDER BY date DESC
+  `, (err, dailyStats) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    res.json({
+      success: true,
+      dailyStats: dailyStats
+    });
+  });
+});
+
+// Get user registration stats
+app.get('/api/metrics/users', (req, res) => {
+  db.all(`
+    SELECT 
+      DATE(created_at) as date,
+      user_type,
+      COUNT(*) as count
+    FROM users 
+    WHERE created_at >= datetime('now', '-30 days')
+    GROUP BY DATE(created_at), user_type
+    ORDER BY date DESC
+  `, (err, userStats) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    res.json({
+      success: true,
+      userStats: userStats
+    });
+  });
+});
+
+// Get current metrics (works even with existing data)
+app.get('/api/metrics/current', (req, res) => {
+  const currentWeekKey = getCurrentWeekKey();
+  
+  Promise.all([
+    // Total users ever registered
+    new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM users', (err, result) => {
+        resolve(err ? 0 : result.count);
+      });
+    }),
+    
+    // Users this week
+    new Promise((resolve) => {
+      db.get(`SELECT COUNT(*) as count FROM users WHERE week_key = ?`, [currentWeekKey], (err, result) => {
+        resolve(err ? 0 : result.count);
+      });
+    }),
+    
+    // Mentors vs mentees this week
+    new Promise((resolve) => {
+      db.all(`SELECT user_type, COUNT(*) as count FROM users WHERE week_key = ? GROUP BY user_type`, [currentWeekKey], (err, result) => {
+        resolve(err ? [] : result);
+      });
+    }),
+
+    // Total sessions from matches table
+    new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM matches', (err, result) => {
+        resolve(err ? 0 : result.count);
+      });
+    })
+  ]).then(([totalUsers, weeklyUsers, userTypes, totalSessions]) => {
+    const breakdown = userTypes.reduce((acc, item) => {
+      acc[item.user_type] = item.count;
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      metrics: {
+        totalUsersEver: totalUsers,
+        usersThisWeek: weeklyUsers,
+        totalSessions: totalSessions,
+        breakdown: {
+          mentors: breakdown.mentor || 0,
+          mentees: breakdown.mentee || 0
+        }
+      },
+      weekKey: currentWeekKey,
+      generatedAt: new Date().toISOString()
+    });
+  });
 });
 
 // Health check endpoint
