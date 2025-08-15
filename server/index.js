@@ -9,6 +9,34 @@ const path = require('path');
 const { google } = require('googleapis');
 require('dotenv').config();
 
+// Timezone constants and utilities
+const BRAZIL_TIMEZONE = 'America/Sao_Paulo';
+
+// Utility function to get current date/time in Brazil timezone
+function getBrazilDate(date = null) {
+  const targetDate = date || new Date();
+  return new Date(targetDate.toLocaleString("en-US", {timeZone: BRAZIL_TIMEZONE}));
+}
+
+// Utility function to format date in Brazil timezone for ISO string with timezone
+function formatBrazilDateTime(date, timeString) {
+  // Create date in Brazil timezone
+  const brazilDate = getBrazilDate(date);
+  const [hours, minutes] = timeString.split(':').map(Number);
+  
+  // Set the time
+  brazilDate.setHours(hours, minutes, 0, 0);
+  
+  // Return ISO string but for Brazil timezone calculation
+  return brazilDate;
+}
+
+// Utility function to get date string in YYYY-MM-DD format for Brazil timezone
+function getBrazilDateString(date = null) {
+  const brazilDate = getBrazilDate(date);
+  return brazilDate.toISOString().split('T')[0];
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -71,11 +99,12 @@ db.serialize(() => {
   )`);
 });
 
-// Helper function to get current week key
+// Helper function to get current week key (using Brazil timezone)
 function getCurrentWeekKey() {
-  const now = new Date();
-  const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-  return startOfWeek.toISOString().split('T')[0];
+  const now = getBrazilDate(); // Get current date in Brazil timezone
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay());
+  return getBrazilDateString(startOfWeek);
 }
 
 // Helper function to clean old data (older than current week)
@@ -133,9 +162,9 @@ async function createCalendarEvent(mentorEmail, menteeEmail, dayOfWeek, schedule
     // Calculate the actual date for the event (this week's occurrence of the dayOfWeek)
     const eventDate = getNextWeekdayDate(dayOfWeek);
     
-    // Convert time strings to proper datetime
-    const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00`);
-    const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00`);
+    // Create datetime objects in Brazil timezone
+    const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00-03:00`); // Brazil timezone offset
+    const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00-03:00`);
 
     const event = {
       summary: 'Mentor Match - Mentoring Session',
@@ -185,9 +214,9 @@ async function createCalendarEvent(mentorEmail, menteeEmail, dayOfWeek, schedule
   }
 }
 
-// Helper function to get next occurrence of a weekday
+// Helper function to get next occurrence of a weekday (using Brazil timezone)
 function getNextWeekdayDate(dayOfWeek) {
-  const today = new Date();
+  const today = getBrazilDate(); // Get current date in Brazil timezone
   
   // Convert day name to day number (0=Sunday, 1=Monday, etc.)
   const dayNameToNumber = {
@@ -207,7 +236,7 @@ function getNextWeekdayDate(dayOfWeek) {
   const targetDate = new Date(today);
   targetDate.setDate(today.getDate() + daysToAdd);
   
-  return targetDate.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+  return getBrazilDateString(targetDate); // Return YYYY-MM-DD format in Brazil timezone
 }
 
 // Helper function to convert 12-hour time to 24-hour format
@@ -240,8 +269,9 @@ function convertTo24Hour(time12h) {
 function generateGoogleCalendarLink(mentorEmail, menteeEmail, dayOfWeek, scheduledTime) {
   const eventDate = getNextWeekdayDate(dayOfWeek);
   const [startTimeStr, endTimeStr] = scheduledTime.split(' - ');
-  const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00`);
-  const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00`);
+  // Create datetime objects in Brazil timezone
+  const startDateTime = new Date(`${eventDate}T${convertTo24Hour(startTimeStr)}:00-03:00`);
+  const endDateTime = new Date(`${eventDate}T${convertTo24Hour(endTimeStr)}:00-03:00`);
 
   const formatDateForGoogle = (date) => {
     return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -253,7 +283,7 @@ function generateGoogleCalendarLink(mentorEmail, menteeEmail, dayOfWeek, schedul
   const eventTitle = encodeURIComponent('Mentor Match - Mentoring Session');
   const eventDetails = encodeURIComponent(`Mentoring session\nMentor: ${mentorEmail}\nMentee: ${menteeEmail}\n\nPlease coordinate with your partner to confirm meeting details.`);
   
-  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${eventTitle}&dates=${startTime}/${endTime}&details=${eventDetails}&location=Google%20Meet`;
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${eventTitle}&dates=${startTime}/${endTime}&details=${eventDetails}&location=Google%20Meet&ctz=${BRAZIL_TIMEZONE}`;
 }
 
 // API Routes
