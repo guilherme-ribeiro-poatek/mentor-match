@@ -47,6 +47,7 @@ export interface TimeSlot {
   dayOfWeek: number; // 0 = Sunday, 1 = Monday, etc.
   startTime: string; // Format: "HH:MM"
   endTime: string;   // Format: "HH:MM"
+  weekKey?: string;  // Format: "YYYY-MM-DD" (Monday of the week)
 }
 
 export interface User {
@@ -65,6 +66,7 @@ export interface Match {
   endTime: string;
   duration: number; // in minutes
   abilities?: AbilityType[]; // For mentors, displayed to mentees
+  weekKey?: string; // Format: "YYYY-MM-DD" (Monday of the week)
 }
 
 export interface UserData {
@@ -73,4 +75,11 @@ export interface UserData {
   userType: UserType;
   selectedSlots: TimeSlot[];
   abilities?: AbilityType[]; // For mentors
+}
+
+export interface WeekOption {
+  weekKey: string; // Format: "YYYY-MM-DD" (Monday of the week)
+  label: string; // Display label like "This Week (Dec 9-15)"
+  startDate: Date;
+  endDate: Date;
 } 

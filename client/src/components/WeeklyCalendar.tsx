@@ -1,31 +1,20 @@
 import React from 'react';
 import { TimeSlot } from '../types';
+import { getWeekDates, isDateInPast } from '../utils/weekUtils';
 
 interface WeeklyCalendarProps {
   selectedSlots: TimeSlot[];
   onSlotsChange: (slots: TimeSlot[]) => void;
+  selectedWeekKey: string;
 }
 
 const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   selectedSlots,
   onSlotsChange,
+  selectedWeekKey,
 }) => {
-  // Get current week's dates
-  const getCurrentWeekDates = () => {
-    const today = new Date();
-    const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - currentDay); // Go back to Sunday
-    
-    const weekDates = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(startOfWeek);
-      date.setDate(startOfWeek.getDate() + i);
-      weekDates.push(date);
-    }
-    
-    return weekDates;
-  };
+  // Get the dates for the selected week
+  const weekDates = getWeekDates(selectedWeekKey);
 
   const formatDate = (date: Date): string => {
     return date.toLocaleDateString('en-US', { 
@@ -39,15 +28,7 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
     return date.toDateString() === today.toDateString();
   };
 
-  const isPastDay = (date: Date): boolean => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time to start of day
-    const compareDate = new Date(date);
-    compareDate.setHours(0, 0, 0, 0);
-    return compareDate < today;
-  };
 
-  const weekDates = getCurrentWeekDates();
 
   // Days of the week (0 = Sunday)
   const days = [
@@ -93,14 +74,15 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
       slot => 
         slot.dayOfWeek === dayOfWeek && 
         slot.startTime === startTime && 
-        slot.endTime === endTime
+        slot.endTime === endTime &&
+        (slot.weekKey === selectedWeekKey || !slot.weekKey) // Support legacy slots without weekKey
     );
   };
 
   const toggleSlot = (dayOfWeek: number, startTime: string, endTime: string) => {
     // Check if the day is in the past - if so, don't allow selection
     const dayDate = weekDates[dayOfWeek];
-    if (isPastDay(dayDate)) {
+    if (isDateInPast(dayDate)) {
       return;
     }
 
@@ -112,13 +94,19 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         slot => !(
           slot.dayOfWeek === dayOfWeek && 
           slot.startTime === startTime && 
-          slot.endTime === endTime
+          slot.endTime === endTime &&
+          (slot.weekKey === selectedWeekKey || !slot.weekKey)
         )
       );
       onSlotsChange(newSlots);
     } else {
-      // Add the slot
-      const newSlot: TimeSlot = { dayOfWeek, startTime, endTime };
+      // Add the slot with week key
+      const newSlot: TimeSlot = { 
+        dayOfWeek, 
+        startTime, 
+        endTime, 
+        weekKey: selectedWeekKey 
+      };
       onSlotsChange([...selectedSlots, newSlot]);
     }
   };
@@ -133,7 +121,7 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         {days.map(day => {
           const dayDate = weekDates[day.value];
           const isCurrent = isCurrentDay(dayDate);
-          const isPast = isPastDay(dayDate);
+          const isPast = isDateInPast(dayDate);
           
           return (
             <div key={day.value} className={`p-3 text-center ${
@@ -183,7 +171,7 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
             {days.map(day => {
               const selected = isSlotSelected(day.value, timeSlot.startTime, timeSlot.endTime);
               const dayDate = weekDates[day.value];
-              const isPast = isPastDay(dayDate);
+              const isPast = isDateInPast(dayDate);
               
               return (
                 <div

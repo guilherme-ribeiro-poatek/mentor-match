@@ -111,9 +111,19 @@ function getCurrentWeekKey() {
 function cleanOldData() {
   const currentWeekKey = getCurrentWeekKey();
   
+  // Clean old availability and abilities
   db.run(`DELETE FROM availability WHERE week_key < ?`, [currentWeekKey]);
   db.run(`DELETE FROM abilities WHERE week_key < ?`, [currentWeekKey]);
-  db.run(`DELETE FROM users WHERE week_key < ?`, [currentWeekKey]);
+  
+  // Only delete users if they have no availability in current or future weeks
+  db.run(`
+    DELETE FROM users 
+    WHERE id NOT IN (
+      SELECT DISTINCT user_id 
+      FROM availability 
+      WHERE week_key >= ?
+    )
+  `, [currentWeekKey]);
   
   console.log(`Cleaned data older than week: ${currentWeekKey}`);
 }
@@ -296,10 +306,8 @@ app.post('/api/check-email', (req, res) => {
     return res.status(400).json({ error: 'Email is required' });
   }
 
-  const currentWeekKey = getCurrentWeekKey();
-
-  // Check if user exists for current week
-  db.get(`SELECT * FROM users WHERE email = ? AND week_key = ?`, [email, currentWeekKey], (err, user) => {
+  // Check if user exists (any week)
+  db.get(`SELECT * FROM users WHERE email = ?`, [email], (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -313,8 +321,9 @@ app.post('/api/check-email', (req, res) => {
       });
     }
 
-    // Get user's availability
-    db.all(`SELECT * FROM availability WHERE user_id = ? AND week_key = ?`, [user.id, currentWeekKey], (err, availability) => {
+    // Get user's availability from all weeks (current and future)
+    const currentWeekKey = getCurrentWeekKey();
+    db.all(`SELECT * FROM availability WHERE user_id = ? AND week_key >= ? ORDER BY week_key ASC`, [user.id, currentWeekKey], (err, availability) => {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
@@ -323,7 +332,8 @@ app.post('/api/check-email', (req, res) => {
       const transformedAvailability = availability.map(slot => ({
         dayOfWeek: slot.day_of_week,
         startTime: slot.start_time,
-        endTime: slot.end_time
+        endTime: slot.end_time,
+        weekKey: slot.week_key
       }));
 
       res.json({ 
@@ -343,54 +353,76 @@ app.post('/api/register', (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const userId = uuidv4();
-  const weekKey = getCurrentWeekKey();
+  // Validation: prevent scheduling for past dates
+  const currentWeekKey = getCurrentWeekKey();
+  const pastSlots = availability.filter(slot => slot.weekKey && slot.weekKey < currentWeekKey);
+  if (pastSlots.length > 0) {
+    return res.status(400).json({ error: 'Cannot schedule availability for past weeks' });
+  }
 
-  // Insert user
-  db.run(
-    `INSERT OR REPLACE INTO users (id, email, user_type, week_key) VALUES (?, ?, ?, ?)`,
-    [userId, email, userType, weekKey],
-    function(err) {
+  const userId = uuidv4();
+
+  // Check if user already exists
+  db.get(`SELECT id FROM users WHERE email = ?`, [email], (err, existingUser) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    const userIdToUse = existingUser ? existingUser.id : userId;
+
+    // Insert or update user
+    const userQuery = existingUser 
+      ? `UPDATE users SET user_type = ?, week_key = ? WHERE id = ?`
+      : `INSERT INTO users (id, email, user_type, week_key) VALUES (?, ?, ?, ?)`;
+    
+    const userParams = existingUser 
+      ? [userType, currentWeekKey, userIdToUse]
+      : [userIdToUse, email, userType, currentWeekKey];
+
+    db.run(userQuery, userParams, function(err) {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
 
       // Delete existing availability and abilities for this user
-      db.run(`DELETE FROM availability WHERE user_id = ?`, [userId], (err) => {
+      db.run(`DELETE FROM availability WHERE user_id = ?`, [userIdToUse], (err) => {
         if (err) {
           return res.status(500).json({ error: 'Database error' });
         }
 
-        db.run(`DELETE FROM abilities WHERE user_id = ?`, [userId], (err) => {
+        db.run(`DELETE FROM abilities WHERE user_id = ?`, [userIdToUse], (err) => {
           if (err) {
             return res.status(500).json({ error: 'Database error' });
           }
 
-          // Insert availability slots
-          const availabilityStmt = db.prepare(`INSERT INTO availability (user_id, day_of_week, start_time, end_time, week_key) VALUES (?, ?, ?, ?, ?)`);
-          
-          availability.forEach(slot => {
-            availabilityStmt.run([userId, slot.dayOfWeek, slot.startTime, slot.endTime, weekKey]);
-          });
-          
-          availabilityStmt.finalize();
+          // Insert availability slots with their respective week keys
+          if (availability.length > 0) {
+            const availabilityStmt = db.prepare(`INSERT INTO availability (user_id, day_of_week, start_time, end_time, week_key) VALUES (?, ?, ?, ?, ?)`);
+            
+            availability.forEach(slot => {
+              const weekKeyToUse = slot.weekKey || currentWeekKey; // Default to current week if not specified
+              availabilityStmt.run([userIdToUse, slot.dayOfWeek, slot.startTime, slot.endTime, weekKeyToUse]);
+            });
+            
+            availabilityStmt.finalize();
+          }
 
-          // Insert abilities if user is a mentor
+          // Insert abilities if user is a mentor (abilities are associated with the user, not week-specific)
           if (userType === 'mentor' && abilities && abilities.length > 0) {
             const abilitiesStmt = db.prepare(`INSERT INTO abilities (user_id, ability, week_key) VALUES (?, ?, ?)`);
             
             abilities.forEach(ability => {
-              abilitiesStmt.run([userId, ability, weekKey]);
+              abilitiesStmt.run([userIdToUse, ability, currentWeekKey]);
             });
             
             abilitiesStmt.finalize();
           }
           
-          res.json({ success: true, userId });
+          res.json({ success: true, userId: userIdToUse });
         });
       });
-    }
-  );
+    });
+  });
 });
 
 // Find matches for a user
@@ -410,18 +442,18 @@ app.post('/api/find-matches', (req, res) => {
     const oppositeType = user.user_type === 'mentor' ? 'mentee' : 'mentor';
     const currentWeekKey = getCurrentWeekKey();
 
-    // Get user's availability
-    db.all(`SELECT * FROM availability WHERE user_id = ? AND week_key = ?`, [userId, currentWeekKey], (err, userAvailability) => {
+    // Get user's availability from current and future weeks
+    db.all(`SELECT * FROM availability WHERE user_id = ? AND week_key >= ?`, [userId, currentWeekKey], (err, userAvailability) => {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
 
-      // Get opposite type users' availability
+      // Get opposite type users' availability from current and future weeks
       db.all(`
         SELECT a.*, u.email, u.user_type, u.id as user_id 
         FROM availability a 
         JOIN users u ON a.user_id = u.id 
-        WHERE u.user_type = ? AND a.week_key = ?
+        WHERE u.user_type = ? AND a.week_key >= ?
       `, [oppositeType, currentWeekKey], (err, otherAvailability) => {
         if (err) {
           return res.status(500).json({ error: 'Database error' });
@@ -456,7 +488,8 @@ app.post('/api/find-matches', (req, res) => {
             
             userAvailability.forEach(userSlot => {
               otherAvailability.forEach(otherSlot => {
-                if (userSlot.day_of_week === otherSlot.day_of_week) {
+                // Match slots from the same week and same day
+                if (userSlot.day_of_week === otherSlot.day_of_week && userSlot.week_key === otherSlot.week_key) {
                   const overlap = findTimeOverlap(userSlot, otherSlot);
                   if (overlap && overlap.duration >= 30) { // Minimum 30 minutes
                     matches.push({
@@ -466,7 +499,8 @@ app.post('/api/find-matches', (req, res) => {
                       startTime: overlap.startTime,
                       endTime: overlap.endTime,
                       duration: overlap.duration,
-                      abilities: abilitiesByUser[otherSlot.user_id] || []
+                      abilities: abilitiesByUser[otherSlot.user_id] || [],
+                      weekKey: userSlot.week_key
                     });
                   }
                 }
@@ -485,7 +519,8 @@ app.post('/api/find-matches', (req, res) => {
           
           userAvailability.forEach(userSlot => {
             otherAvailability.forEach(otherSlot => {
-              if (userSlot.day_of_week === otherSlot.day_of_week) {
+              // Match slots from the same week and same day
+              if (userSlot.day_of_week === otherSlot.day_of_week && userSlot.week_key === otherSlot.week_key) {
                 const overlap = findTimeOverlap(userSlot, otherSlot);
                 if (overlap && overlap.duration >= 30) { // Minimum 30 minutes
                   matches.push({
@@ -494,7 +529,8 @@ app.post('/api/find-matches', (req, res) => {
                     dayOfWeek: userSlot.day_of_week,
                     startTime: overlap.startTime,
                     endTime: overlap.endTime,
-                    duration: overlap.duration
+                    duration: overlap.duration,
+                    weekKey: userSlot.week_key
                   });
                 }
               }
@@ -594,7 +630,7 @@ function distributeMatches(matches, limit) {
 
 // Send invitation email
 app.post('/api/send-invitation', async (req, res) => {
-  const { mentorEmail, menteeEmail, scheduledTime, scheduledDate, dayOfWeek } = req.body;
+  const { mentorEmail, menteeEmail, scheduledTime, scheduledDate, dayOfWeek, weekKey } = req.body;
   
   if (!mentorEmail || !menteeEmail || !scheduledTime || !scheduledDate) {
     return res.status(400).json({ error: 'Missing required fields' });

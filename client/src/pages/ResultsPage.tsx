@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Match, UserData } from '../types';
+import { getDateForWeekDay, formatDateLong, getDayNameFromDate, getCurrentWeekKey } from '../utils/weekUtils';
 
 interface MatchResults {
   matches: Match[];
@@ -28,6 +29,22 @@ const ResultsPage: React.FC = () => {
     return days[dayOfWeek];
   };
 
+  const getFormattedMatchDate = (match: Match): { fullDate: string; dayName: string } => {
+    if (match.weekKey) {
+      const actualDate = getDateForWeekDay(match.weekKey, match.dayOfWeek);
+      return {
+        fullDate: formatDateLong(actualDate),
+        dayName: getDayNameFromDate(actualDate)
+      };
+    } else {
+      // Fallback for matches without weekKey (legacy data)
+      return {
+        fullDate: 'This week',
+        dayName: getDayName(match.dayOfWeek)
+      };
+    }
+  };
+
   const formatTime = (time: string): string => {
     const [hours, minutes] = time.split(':');
     const hour = parseInt(hours);
@@ -47,8 +64,9 @@ const ResultsPage: React.FC = () => {
           mentorEmail: results!.userData.userType === 'mentor' ? results!.userData.email : match.partnerEmail,
           menteeEmail: results!.userData.userType === 'mentee' ? results!.userData.email : match.partnerEmail,
           scheduledTime: `${formatTime(match.startTime)} - ${formatTime(match.endTime)}`,
-          scheduledDate: 'This week', // You might want to calculate the actual date
-          dayOfWeek: getDayName(match.dayOfWeek)
+          scheduledDate: getFormattedMatchDate(match).fullDate,
+          dayOfWeek: getFormattedMatchDate(match).dayName,
+          weekKey: match.weekKey || getCurrentWeekKey()
         }),
       });
 
@@ -121,58 +139,65 @@ const ResultsPage: React.FC = () => {
               Suggested Time Slots:
             </h3>
             
-            {matches.map((match, index) => (
-              <div key={index} className="border border-gray-200 rounded-lg p-4 hover:border-primary-300 transition-colors duration-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center mb-2">
-                      <div className="text-2xl mr-3">
-                        {userData.userType === 'mentor' ? '🎓' : '👨‍🏫'}
+            {matches.map((match, index) => {
+              const matchDate = getFormattedMatchDate(match);
+              
+              return (
+                <div key={index} className="border border-gray-200 rounded-lg p-4 hover:border-primary-300 transition-colors duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center mb-2">
+                        <div className="text-2xl mr-3">
+                          {userData.userType === 'mentor' ? '🎓' : '👨‍🏫'}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-900">
+                            {matchDate.fullDate}
+                          </p>
+                          <p className="text-sm font-medium text-primary-600">
+                            {matchDate.dayName}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {formatTime(match.startTime)} - {formatTime(match.endTime)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-gray-900">
-                          {getDayName(match.dayOfWeek)}
+                      
+                      <div className="text-sm text-gray-600">
+                        <p>Duration: {match.duration} minutes</p>
+                        <p>
+                          {userData.userType === 'mentor' ? 'Mentee' : 'Mentor'}: {match.partnerEmail}
                         </p>
-                        <p className="text-sm text-gray-600">
-                          {formatTime(match.startTime)} - {formatTime(match.endTime)}
-                        </p>
+                        {userData.userType === 'mentee' && match.abilities && match.abilities.length > 0 && (
+                          <div className="mt-2">
+                            <p className="font-medium text-gray-700 mb-1">Mentoring Abilities:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {match.abilities.map((ability, index) => (
+                                <span 
+                                  key={index}
+                                  className="px-2 py-1 bg-primary-100 text-primary-800 text-xs rounded-full"
+                                >
+                                  {ability}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     
-                    <div className="text-sm text-gray-600">
-                      <p>Duration: {match.duration} minutes</p>
-                      <p>
-                        {userData.userType === 'mentor' ? 'Mentee' : 'Mentor'}: {match.partnerEmail}
-                      </p>
-                      {userData.userType === 'mentee' && match.abilities && match.abilities.length > 0 && (
-                        <div className="mt-2">
-                          <p className="font-medium text-gray-700 mb-1">Mentoring Abilities:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {match.abilities.map((ability, index) => (
-                              <span 
-                                key={index}
-                                className="px-2 py-1 bg-primary-100 text-primary-800 text-xs rounded-full"
-                              >
-                                {ability}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                    <div className="ml-4">
+                      <button
+                        onClick={() => sendInvitation(match)}
+                        className="btn-primary text-sm px-4 py-2"
+                      >
+                        Send Invite
+                      </button>
                     </div>
                   </div>
-                  
-                  <div className="ml-4">
-                    <button
-                      onClick={() => sendInvitation(match)}
-                      className="btn-primary text-sm px-4 py-2"
-                    >
-                      Send Invite
-                    </button>
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-start">
@@ -229,4 +254,4 @@ const ResultsPage: React.FC = () => {
   );
 };
 
-export default ResultsPage; 
+export default ResultsPage;

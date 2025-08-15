@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WeeklyCalendar from '../components/WeeklyCalendar';
-import { UserType, TimeSlot, AbilityType, ABILITIES } from '../types';
+import WeekSelector from '../components/WeekSelector';
+import { UserType, TimeSlot, AbilityType, ABILITIES, WeekOption } from '../types';
+import { getCurrentWeekKey, generateAvailableWeeks } from '../utils/weekUtils';
 
 const CalendarSelectionPage: React.FC = () => {
   const navigate = useNavigate();
@@ -13,6 +15,8 @@ const CalendarSelectionPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [hasExistingData, setHasExistingData] = useState(false);
+  const [selectedWeekKey, setSelectedWeekKey] = useState(getCurrentWeekKey());
+  const [availableWeeks] = useState<WeekOption[]>(generateAvailableWeeks());
 
   useEffect(() => {
     // Get email and user type from sessionStorage
@@ -67,7 +71,8 @@ const CalendarSelectionPage: React.FC = () => {
 
       const data = await response.json();
 
-      if (data.exists && data.availability.length > 0) {
+      if (data.exists && data.availability && data.availability.length > 0) {
+        // Load all availability slots (from all weeks)
         setSelectedSlots(data.availability);
         setHasExistingData(true);
       } else {
@@ -96,8 +101,8 @@ const CalendarSelectionPage: React.FC = () => {
   const handleSubmit = async () => {
     setError('');
 
-    if (selectedSlots.length === 0) {
-      setError('Please select at least one time slot');
+    if (totalSlotsAcrossAllWeeks === 0) {
+      setError('Please select at least one time slot from any week');
       return;
     }
 
@@ -121,6 +126,7 @@ const CalendarSelectionPage: React.FC = () => {
             dayOfWeek: slot.dayOfWeek,
             startTime: slot.startTime,
             endTime: slot.endTime,
+            weekKey: slot.weekKey,
           })),
           abilities: userType === 'mentor' ? selectedAbilities : undefined,
         }),
@@ -156,7 +162,19 @@ const CalendarSelectionPage: React.FC = () => {
   const handleStartOver = () => {
     setSelectedSlots([]);
     setHasExistingData(false);
+    setSelectedWeekKey(getCurrentWeekKey());
   };
+
+  const handleWeekChange = (weekKey: string) => {
+    setSelectedWeekKey(weekKey);
+  };
+
+  // Get slots for the currently selected week
+  const currentWeekSlots = selectedSlots.filter(slot => 
+    slot.weekKey === selectedWeekKey || (!slot.weekKey && selectedWeekKey === getCurrentWeekKey())
+  );
+
+  const totalSlotsAcrossAllWeeks = selectedSlots.length;
 
   if (isLoading) {
     return (
@@ -173,9 +191,9 @@ const CalendarSelectionPage: React.FC = () => {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              Select Your Availability
-            </h2>
+                      <h2 className="text-2xl font-bold text-gray-900">
+            Select Your Weekly Availability
+          </h2>
             <p className="text-gray-600 mt-1">
               {userType === 'mentor' ? '👨‍🏫 Mentor' : '🎓 Mentee'} • {email}
             </p>
@@ -193,7 +211,7 @@ const CalendarSelectionPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">📅 We found your previous availability</p>
-                <p className="text-sm">You can edit your time slots below or start over with a fresh selection.</p>
+                <p className="text-sm">You have {totalSlotsAcrossAllWeeks} time slot{totalSlotsAcrossAllWeeks !== 1 ? 's' : ''} across different weeks. You can edit them below or start over.</p>
               </div>
               <button
                 onClick={handleStartOver}
@@ -241,19 +259,27 @@ const CalendarSelectionPage: React.FC = () => {
       {/* Weekly Calendar */}
       <div className="card">
         <h3 className="text-xl font-semibold text-gray-900 mb-4">
-          {hasExistingData ? 'Update Your Availability This Week' : 'Select Your Availability This Week'}
+          {hasExistingData ? 'Update Your Weekly Availability' : 'Select Your Weekly Availability'}
         </h3>
         <p className="text-gray-600 mb-6">
-          Click on time slots to mark when you're available. Minimum session length is 30 minutes.
+          Choose which week to schedule, then click on time slots to mark when you're available. You can schedule for multiple weeks.
         </p>
+        
+        <WeekSelector
+          selectedWeek={selectedWeekKey}
+          onWeekChange={handleWeekChange}
+          availableWeeks={availableWeeks}
+        />
         
         <WeeklyCalendar
           selectedSlots={selectedSlots}
           onSlotsChange={setSelectedSlots}
+          selectedWeekKey={selectedWeekKey}
         />
         
-        <div className="mt-4 text-sm text-gray-500">
-          Selected: {selectedSlots.length} time slot{selectedSlots.length !== 1 ? 's' : ''}
+        <div className="mt-4 text-sm text-gray-500 space-y-1">
+          <div>This week: {currentWeekSlots.length} time slot{currentWeekSlots.length !== 1 ? 's' : ''}</div>
+          <div>Total across all weeks: {totalSlotsAcrossAllWeeks} time slot{totalSlotsAcrossAllWeeks !== 1 ? 's' : ''}</div>
         </div>
       </div>
 
