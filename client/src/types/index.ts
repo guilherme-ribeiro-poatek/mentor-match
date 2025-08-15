@@ -82,4 +82,17 @@ export interface WeekOption {
   label: string; // Display label like "This Week (Dec 9-15)"
   startDate: Date;
   endDate: Date;
+}
+
+export interface AvailableUser {
+  email: string;
+  userId: string;
+  abilities?: AbilityType[]; // For mentors when requested by mentees
+}
+
+export interface WeekAvailability {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  users: AvailableUser[];
 } 

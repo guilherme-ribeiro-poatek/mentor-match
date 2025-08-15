@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WeeklyCalendar from '../components/WeeklyCalendar';
 import WeekSelector from '../components/WeekSelector';
-import { UserType, TimeSlot, AbilityType, ABILITIES, WeekOption } from '../types';
+import { UserType, TimeSlot, AbilityType, ABILITIES, WeekOption, WeekAvailability } from '../types';
 import { getCurrentWeekKey, generateAvailableWeeks } from '../utils/weekUtils';
 
 const CalendarSelectionPage: React.FC = () => {
@@ -17,6 +17,8 @@ const CalendarSelectionPage: React.FC = () => {
   const [hasExistingData, setHasExistingData] = useState(false);
   const [selectedWeekKey, setSelectedWeekKey] = useState(getCurrentWeekKey());
   const [availableWeeks] = useState<WeekOption[]>(generateAvailableWeeks());
+  const [weekAvailability, setWeekAvailability] = useState<WeekAvailability[]>([]);
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
 
   useEffect(() => {
     // Get email and user type from sessionStorage
@@ -39,6 +41,11 @@ const CalendarSelectionPage: React.FC = () => {
 
     // Check if user already has availability data
     checkExistingAvailability(storedEmail);
+    
+    // Load availability data for the current week
+    if (storedUserType) {
+      loadWeekAvailability(getCurrentWeekKey(), storedUserType);
+    }
   }, [navigate]);
 
   const loadStoredAbilities = (email: string) => {
@@ -165,8 +172,39 @@ const CalendarSelectionPage: React.FC = () => {
     setSelectedWeekKey(getCurrentWeekKey());
   };
 
+  const loadWeekAvailability = async (weekKey: string, userType: UserType) => {
+    setIsLoadingAvailability(true);
+    try {
+      const response = await fetch('/api/get-week-availability', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userType, weekKey }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setWeekAvailability(data.availability || []);
+      } else {
+        console.error('Error loading week availability:', data.error);
+        setWeekAvailability([]);
+      }
+    } catch (error) {
+      console.error('Error loading week availability:', error);
+      setWeekAvailability([]);
+    } finally {
+      setIsLoadingAvailability(false);
+    }
+  };
+
   const handleWeekChange = (weekKey: string) => {
     setSelectedWeekKey(weekKey);
+    // Load availability data for the new week
+    if (userType) {
+      loadWeekAvailability(weekKey, userType);
+    }
   };
 
   // Get slots for the currently selected week
@@ -275,6 +313,9 @@ const CalendarSelectionPage: React.FC = () => {
           selectedSlots={selectedSlots}
           onSlotsChange={setSelectedSlots}
           selectedWeekKey={selectedWeekKey}
+          weekAvailability={weekAvailability}
+          isLoadingAvailability={isLoadingAvailability}
+          userType={userType}
         />
         
         <div className="mt-4 text-sm text-gray-500 space-y-1">

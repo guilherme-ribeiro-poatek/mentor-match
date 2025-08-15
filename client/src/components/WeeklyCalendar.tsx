@@ -1,20 +1,27 @@
-import React from 'react';
-import { TimeSlot } from '../types';
+import React, { useState } from 'react';
+import { TimeSlot, UserType, WeekAvailability } from '../types';
 import { getWeekDates, isDateInPast } from '../utils/weekUtils';
 
 interface WeeklyCalendarProps {
   selectedSlots: TimeSlot[];
   onSlotsChange: (slots: TimeSlot[]) => void;
   selectedWeekKey: string;
+  weekAvailability: WeekAvailability[];
+  isLoadingAvailability: boolean;
+  userType: UserType;
 }
 
 const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   selectedSlots,
   onSlotsChange,
   selectedWeekKey,
+  weekAvailability,
+  isLoadingAvailability,
+  userType,
 }) => {
   // Get the dates for the selected week
   const weekDates = getWeekDates(selectedWeekKey);
+  const [hoveredSlot, setHoveredSlot] = useState<string | null>(null);
 
   const formatDate = (date: Date): string => {
     return date.toLocaleDateString('en-US', { 
@@ -77,6 +84,20 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         slot.endTime === endTime &&
         (slot.weekKey === selectedWeekKey || !slot.weekKey) // Support legacy slots without weekKey
     );
+  };
+
+  const getSlotAvailability = (dayOfWeek: number, startTime: string, endTime: string): WeekAvailability | null => {
+    return weekAvailability.find(
+      availability => 
+        availability.dayOfWeek === dayOfWeek &&
+        availability.startTime === startTime &&
+        availability.endTime === endTime
+    ) || null;
+  };
+
+  const hasAvailableUsers = (dayOfWeek: number, startTime: string, endTime: string): boolean => {
+    const availability = getSlotAvailability(dayOfWeek, startTime, endTime);
+    return availability !== null && availability.users.length > 0;
   };
 
   const toggleSlot = (dayOfWeek: number, startTime: string, endTime: string) => {
@@ -172,28 +193,62 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
               const selected = isSlotSelected(day.value, timeSlot.startTime, timeSlot.endTime);
               const dayDate = weekDates[day.value];
               const isPast = isDateInPast(dayDate);
+              const hasUsers = hasAvailableUsers(day.value, timeSlot.startTime, timeSlot.endTime);
+              const availability = getSlotAvailability(day.value, timeSlot.startTime, timeSlot.endTime);
+              const slotKey = `${day.value}-${timeSlot.startTime}-${timeSlot.endTime}`;
+              const isHovered = hoveredSlot === slotKey;
               
               return (
                 <div
                   key={`${day.value}-${timeIndex}`}
-                  className={`p-2 text-center transition-colors duration-200 border-r border-gray-100 ${
+                  className={`p-2 text-center transition-colors duration-200 border-r border-gray-100 relative ${
                     isPast
                       ? 'cursor-not-allowed bg-gray-50'
                       : selected
                         ? 'bg-primary-600 text-white hover:bg-primary-700 cursor-pointer'
-                        : 'hover:bg-primary-50 cursor-pointer'
+                        : hasUsers
+                          ? 'bg-green-50 hover:bg-green-100 cursor-pointer'
+                          : 'hover:bg-primary-50 cursor-pointer'
                   }`}
                   onClick={() => toggleSlot(day.value, timeSlot.startTime, timeSlot.endTime)}
+                  onMouseEnter={() => hasUsers && setHoveredSlot(slotKey)}
+                  onMouseLeave={() => setHoveredSlot(null)}
                 >
                   <div className={`w-full h-8 rounded flex items-center justify-center text-xs ${
                     isPast
                       ? 'bg-gray-200 text-gray-400'
                       : selected
                         ? 'bg-primary-700 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-primary-200'
+                        : hasUsers
+                          ? 'bg-green-200 text-green-700 hover:bg-green-300'
+                          : 'bg-gray-100 text-gray-600 hover:bg-primary-200'
                   }`}>
-                    {isPast ? '×' : selected ? '✓' : '+'}
+                    {isPast ? '×' : selected ? '✓' : hasUsers ? '👥' : '+'}
                   </div>
+                  
+                  {/* Tooltip */}
+                  {isHovered && availability && availability.users.length > 0 && (
+                    <div className="absolute z-50 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-lg -top-2 left-full ml-2 min-w-max max-w-xs">
+                      <div className="font-medium mb-2">
+                        Available {userType === 'mentor' ? 'Mentees' : 'Mentors'}:
+                      </div>
+                      <div className="space-y-1">
+                        {availability.users.map((user, idx) => (
+                          <div key={idx}>
+                            <div className="font-medium">{user.email}</div>
+                            {userType === 'mentee' && user.abilities && user.abilities.length > 0 && (
+                              <div className="text-gray-300 text-xs mt-1">
+                                {user.abilities.slice(0, 3).join(', ')}
+                                {user.abilities.length > 3 && ` +${user.abilities.length - 3} more`}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Triangle pointer */}
+                      <div className="absolute top-3 -left-1 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -210,13 +265,28 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
               <span>Selected</span>
             </div>
             <div className="flex items-center">
+              <div className="w-4 h-4 bg-green-200 rounded mr-2"></div>
+              <span>Has {userType === 'mentor' ? 'Mentees' : 'Mentors'}</span>
+            </div>
+            <div className="flex items-center">
               <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded mr-2"></div>
               <span>Available</span>
             </div>
           </div>
           <div>
-            Click time slots to select your availability
+            {isLoadingAvailability && (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-600 mr-2"></div>
+                <span className="text-xs">Loading availability...</span>
+              </div>
+            )}
+            {!isLoadingAvailability && (
+              <span>Click time slots to select your availability</span>
+            )}
           </div>
+        </div>
+        <div className="mt-2 text-xs text-gray-500">
+          💡 Hover over green slots to see who's available
         </div>
       </div>
     </div>

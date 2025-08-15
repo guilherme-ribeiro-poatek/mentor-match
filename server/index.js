@@ -425,6 +425,94 @@ app.post('/api/register', (req, res) => {
   });
 });
 
+// Get available users for a specific week (for calendar indicators)
+app.post('/api/get-week-availability', (req, res) => {
+  const { userType, weekKey } = req.body;
+  
+  if (!userType || !weekKey) {
+    return res.status(400).json({ error: 'User type and week key are required' });
+  }
+
+  // Get the opposite user type availability for the specified week
+  const oppositeType = userType === 'mentor' ? 'mentee' : 'mentor';
+  
+  db.all(`
+    SELECT a.day_of_week, a.start_time, a.end_time, u.email, u.id as user_id
+    FROM availability a 
+    JOIN users u ON a.user_id = u.id 
+    WHERE u.user_type = ? AND a.week_key = ?
+    ORDER BY a.day_of_week, a.start_time
+  `, [oppositeType, weekKey], (err, availability) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    // Group availability by day and time slot
+    const availabilityMap = {};
+    
+    availability.forEach(slot => {
+      const key = `${slot.day_of_week}-${slot.start_time}-${slot.end_time}`;
+      if (!availabilityMap[key]) {
+        availabilityMap[key] = {
+          dayOfWeek: slot.day_of_week,
+          startTime: slot.start_time,
+          endTime: slot.end_time,
+          users: []
+        };
+      }
+      availabilityMap[key].users.push({
+        email: slot.email,
+        userId: slot.user_id
+      });
+    });
+
+    // Convert to array and include abilities for mentors if requested by mentees
+    const availabilityData = Object.values(availabilityMap);
+    
+    if (userType === 'mentee') {
+      // Get abilities for mentors
+      const mentorIds = availabilityData.flatMap(slot => 
+        slot.users.map(user => user.userId)
+      );
+      
+      if (mentorIds.length > 0) {
+        const placeholders = mentorIds.map(() => '?').join(',');
+        db.all(`
+          SELECT user_id, ability 
+          FROM abilities 
+          WHERE user_id IN (${placeholders}) AND week_key >= ?
+        `, [...mentorIds, weekKey], (err, abilities) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error' });
+          }
+
+          // Group abilities by user ID
+          const abilitiesByUser = {};
+          abilities.forEach(ability => {
+            if (!abilitiesByUser[ability.user_id]) {
+              abilitiesByUser[ability.user_id] = [];
+            }
+            abilitiesByUser[ability.user_id].push(ability.ability);
+          });
+
+          // Add abilities to users
+          availabilityData.forEach(slot => {
+            slot.users.forEach(user => {
+              user.abilities = abilitiesByUser[user.userId] || [];
+            });
+          });
+
+          res.json({ availability: availabilityData });
+        });
+      } else {
+        res.json({ availability: availabilityData });
+      }
+    } else {
+      res.json({ availability: availabilityData });
+    }
+  });
+});
+
 // Find matches for a user
 app.post('/api/find-matches', (req, res) => {
   const { userId } = req.body;
