@@ -133,7 +133,7 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200">
+    <div className="bg-white rounded-lg border border-gray-200 relative">
       {/* Header with days */}
       <div className="grid grid-cols-8 border-b border-gray-200">
         <div className="p-3 bg-gray-50 font-medium text-sm text-gray-600">
@@ -176,7 +176,7 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
       </div>
 
       {/* Time slots grid */}
-      <div className="max-h-96 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto overflow-x-visible">
         {timeSlots.map((timeSlot, timeIndex) => (
           <div key={timeIndex} className="grid grid-cols-8 border-b border-gray-100 hover:bg-gray-50">
             {/* Time label */}
@@ -228,7 +228,9 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
                   
                   {/* Tooltip */}
                   {isHovered && availability && availability.users.length > 0 && (
-                    <div className="absolute z-50 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-lg -top-2 left-full ml-2 min-w-max max-w-xs">
+                    <div className={`absolute z-[9999] bg-gray-900 text-white text-xs rounded-lg p-3 shadow-xl min-w-max max-w-xs border border-gray-700 ${
+                      day.value >= 4 ? 'right-full mr-2' : 'left-full ml-2'
+                    } top-1/2 transform -translate-y-1/2`}>
                       <div className="font-medium mb-2">
                         Available {userType === 'mentor' ? 'Mentees' : 'Mentors'}:
                       </div>
@@ -246,7 +248,9 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
                         ))}
                       </div>
                       {/* Triangle pointer */}
-                      <div className="absolute top-3 -left-1 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                      <div className={`absolute top-1/2 transform -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45 ${
+                        day.value >= 4 ? '-right-1' : '-left-1'
+                      }`}></div>
                     </div>
                   )}
                 </div>
